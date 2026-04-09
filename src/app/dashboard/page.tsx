@@ -135,6 +135,11 @@ export default function DashboardPage() {
   const [friendPresence, setFriendPresence] = useState<{state: string, last_changed: number} | null>(null);
   const [friendActiveChat, setFriendActiveChat] = useState<string | null>(null);
   
+  // Security Vault States
+  const [vaultExists, setVaultExists] = useState(false);
+  const [vaultPassword, setVaultPassword] = useState("");
+  const [vaultSaving, setVaultSaving] = useState(false);
+  
   // Global Decryption & Presence Caches
   const sharedKeysCache = useRef<Record<string, CryptoKey>>({});
   const [sidebarPreviews, setSidebarPreviews] = useState<Record<string, { last: any, unread: number }>>({});
@@ -249,6 +254,20 @@ export default function DashboardPage() {
     });
     return () => unsubscribe();
   }, [router]);
+
+  // Check if Vault exists
+  useEffect(() => {
+    if (!user) return;
+    const checkVault = async () => {
+       try {
+         const token = await user.getIdToken();
+         const res = await fetch("/api/vault", { headers: { "Authorization": `Bearer ${token}` }});
+         const data = await res.json();
+         setVaultExists(!!data.exists);
+       } catch(e) { console.error("Vault check failed"); }
+    };
+    checkVault();
+  }, [user]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -1070,58 +1089,83 @@ export default function DashboardPage() {
             <h2 className="text-xl font-semibold mb-6 flex items-center gap-2"><Settings className="w-5 h-5 text-indigo-400"/> Settings</h2>
             
             <div className="space-y-4">
-              <div className="p-4 bg-black/50 border border-slate-700 rounded-2xl">
-                <h3 className="text-sm font-semibold mb-1 flex items-center gap-2"><ArchiveRestore className="w-4 h-4 text-emerald-400"/> Local Sync Backup</h3>
-                <p className="text-xs text-slate-400 mb-4">Export your End-to-End encrypted local chat history. Store it securely.</p>
-                <Button 
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl h-10"
-                  onClick={async () => {
-                    const data = await LocalDB.exportFullBackup();
-                    const jsonStr = JSON.stringify(data);
-                    const blob = new Blob([jsonStr], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `nova_backup_${Date.now()}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    toast.success("Backup downloaded!");
-                  }}
-                >
-                  <Download className="w-4 h-4 mr-2" /> Download Backup File
-                </Button>
-              </div>
-
-              <div className="p-4 bg-black/50 border border-slate-700 rounded-2xl">
-                <h3 className="text-sm font-semibold mb-1">Restore Backup</h3>
-                <p className="text-xs text-slate-400 mb-4">Select a previously downloaded backup JSON file to restore local chats.</p>
-                <div className="relative w-full">
-                  <input
-                    type="file"
-                    accept=".json"
-                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = async (e) => {
+              <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl">
+                <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+                   <ShieldCheck className="w-4 h-4 text-indigo-400"/> 
+                   Cloud Security Vault
+                </h3>
+                <p className="text-[10px] text-slate-400 mb-3">
+                   Sync your encryption keys across devices. This allows you to read your chats on other browsers/domain.
+                </p>
+                
+                <div className="space-y-2">
+                   <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
+                      <Input 
+                        type="password"
+                        placeholder="Create Vault Password"
+                        className="h-9 pl-9 text-xs bg-black/40 border-slate-800"
+                        value={vaultPassword}
+                        onChange={(e) => setVaultPassword(e.target.value)}
+                      />
+                   </div>
+                   <Button 
+                     className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl h-9 text-xs font-bold"
+                     disabled={!vaultPassword || vaultSaving}
+                     onClick={async () => {
+                        setVaultSaving(true);
                         try {
-                          const data = JSON.parse(e.target?.result as string);
-                          await LocalDB.importFullBackup(data);
-                          toast.success("Chats Restored! Restarting App...");
-                          setTimeout(() => window.location.reload(), 1500);
-                        } catch(err) {
-                          toast.error("Invalid Backup File");
+                           const privKey = localStorage.getItem("nova_private_key");
+                           if (!privKey) throw new Error("Local key missing");
+                           
+                           const encrypted = await CryptoUtils.encryptWithPassword(privKey, vaultPassword);
+                           const token = await user.getIdToken();
+                           
+                           const res = await fetch("/api/vault", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                              body: JSON.stringify(encrypted)
+                           });
+                           
+                           if (res.ok) {
+                              toast.success("Security Vault Synced!");
+                              setVaultExists(true);
+                              setVaultPassword("");
+                           } else { throw new Error("Sync failed"); }
+                        } catch(err: any) {
+                           toast.error(err.message || "Failed to sync vault");
+                        } finally {
+                           setVaultSaving(false);
                         }
-                      };
-                      reader.readAsText(file);
-                    }}
-                  />
-                  <Button className="w-full bg-[#16161c] hover:bg-slate-800 border border-slate-700 text-white rounded-xl h-10 pointer-events-none">
-                    Select Backup JSON
-                  </Button>
+                     }}
+                   >
+                      {vaultSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (vaultExists ? "Update Security Vault" : "Setup Security Vault")}
+                   </Button>
+                   {vaultExists && <p className="text-[9px] text-center text-emerald-400 font-medium">Backup exists in Cloud</p>}
                 </div>
               </div>
+
+              <div className="p-4 bg-black/50 border border-slate-700 rounded-2xl opacity-60">
+                <h3 className="text-sm font-semibold mb-1 flex items-center gap-2"><ArchiveRestore className="w-4 h-4 text-emerald-400"/> Local Sync Backup</h3>
+                <p className="text-xs text-slate-400 mb-4">Manual JSON sync (Legacy).</p>
+                <div className="flex gap-2">
+                   <Button 
+                     size="sm"
+                     variant="outline"
+                     className="flex-1 border-slate-800 h-9"
+                     onClick={async () => {
+                       const data = await LocalDB.exportFullBackup();
+                       const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+                       const url = URL.createObjectURL(blob);
+                       const a = document.createElement('a'); a.href = url; a.download = `nova_${Date.now()}.json`; a.click();
+                       toast.success("Downloaded");
+                     }}
+                   >
+                     <Download className="w-3 h-3 mr-2" /> Export
+                   </Button>
+                </div>
+              </div>
+
 
               <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl">
                 <h3 className="text-sm font-semibold mb-1 text-red-400">Danger Zone</h3>

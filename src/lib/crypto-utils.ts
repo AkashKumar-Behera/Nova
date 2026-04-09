@@ -111,6 +111,75 @@ export class CryptoUtils {
     );
   }
 
+  /**
+   * Derives a encryption key from a password string using PBKDF2
+   */
+  static async deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
+    const encoder = new TextEncoder();
+    const baseKey = await window.crypto.subtle.importKey(
+      "raw",
+      encoder.encode(password),
+      "PBKDF2",
+      false,
+      ["deriveKey"]
+    );
+
+    return await window.crypto.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt,
+        iterations: 100000,
+        hash: "SHA-256"
+      },
+      baseKey,
+      { name: this.AES_ALGO, length: 256 },
+      false,
+      ["encrypt", "decrypt"]
+    );
+  }
+
+  /**
+   * Encrypts a string (e.g. Private Key) using a password
+   */
+  static async encryptWithPassword(data: string, password: string): Promise<{ ciphertext: string; iv: string; salt: string }> {
+    const salt = window.crypto.getRandomValues(new Uint8Array(16));
+    const encryptionKey = await this.deriveKeyFromPassword(password, salt);
+    
+    const encoder = new TextEncoder();
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await window.crypto.subtle.encrypt(
+      { name: this.AES_ALGO, iv },
+      encryptionKey,
+      encoder.encode(data)
+    );
+
+    return {
+      ciphertext: this.arrayBufferToBase64(ciphertext),
+      iv: this.arrayBufferToBase64(iv.buffer as ArrayBuffer),
+      salt: this.arrayBufferToBase64(salt.buffer as ArrayBuffer)
+    };
+  }
+
+  /**
+   * Decrypts a string using a password
+   */
+  static async decryptWithPassword(encrypted: { ciphertext: string; iv: string; salt: string }, password: string): Promise<string> {
+    const salt = this.base64ToArrayBuffer(encrypted.salt);
+    const encryptionKey = await this.deriveKeyFromPassword(password, new Uint8Array(salt));
+    
+    const ciphertext = this.base64ToArrayBuffer(encrypted.ciphertext);
+    const iv = this.base64ToArrayBuffer(encrypted.iv);
+    
+    const decrypted = await window.crypto.subtle.decrypt(
+      { name: this.AES_ALGO, iv: new Uint8Array(iv) as unknown as ArrayBuffer },
+      encryptionKey,
+      ciphertext
+    );
+
+    return new TextDecoder().decode(decrypted);
+  }
+
+
   // Helpers for base64 conversion
   static arrayBufferToBase64(buffer: ArrayBuffer): string {
     return btoa(String.fromCharCode(...new Uint8Array(buffer)));
