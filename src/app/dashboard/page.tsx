@@ -41,7 +41,9 @@ import {
   X,
   Check,
   CheckCheck,
-  ArchiveRestore
+  ArchiveRestore,
+  ShieldCheck,
+  Lock
 } from "lucide-react";
 import { toast } from "sonner";
 import { CryptoUtils } from "@/lib/crypto-utils";
