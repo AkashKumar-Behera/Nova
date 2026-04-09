@@ -76,7 +76,7 @@ export class CryptoUtils {
    */
   static async encryptMessage(key: CryptoKey, text: string): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
     const encoded = new TextEncoder().encode(text);
-    return this.encryptBinary(key, encoded);
+    return this.encryptBinary(key, encoded.buffer as ArrayBuffer);
   }
 
   /**
@@ -93,7 +93,7 @@ export class CryptoUtils {
   static async encryptBinary(key: CryptoKey, buffer: ArrayBuffer): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const ciphertext = await window.crypto.subtle.encrypt(
-      { name: this.AES_ALGO, iv: iv as any },
+      { name: this.AES_ALGO, iv },
       key,
       buffer
     );
@@ -105,7 +105,7 @@ export class CryptoUtils {
    */
   static async decryptBinary(key: CryptoKey, ciphertext: ArrayBuffer, iv: Uint8Array): Promise<ArrayBuffer> {
     return await window.crypto.subtle.decrypt(
-      { name: this.AES_ALGO, iv: iv as any },
+      { name: this.AES_ALGO, iv: iv as unknown as ArrayBuffer },
       key,
       ciphertext
     );
