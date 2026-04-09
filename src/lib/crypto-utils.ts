@@ -127,7 +127,7 @@ export class CryptoUtils {
     return await window.crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
-        salt,
+        salt: salt.buffer as ArrayBuffer,
         iterations: 100000,
         hash: "SHA-256"
       },
@@ -171,7 +171,7 @@ export class CryptoUtils {
     const iv = this.base64ToArrayBuffer(encrypted.iv);
     
     const decrypted = await window.crypto.subtle.decrypt(
-      { name: this.AES_ALGO, iv: new Uint8Array(iv) as unknown as ArrayBuffer },
+      { name: this.AES_ALGO, iv: iv as ArrayBuffer },
       encryptionKey,
       ciphertext
     );
