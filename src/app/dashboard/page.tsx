@@ -1143,7 +1143,40 @@ export default function DashboardPage() {
                    >
                       {vaultSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (vaultExists ? "Update Security Vault" : "Setup Security Vault")}
                    </Button>
-                   {vaultExists && <p className="text-[9px] text-center text-emerald-400 font-medium">Backup exists in Cloud</p>}
+                   
+                   {vaultExists && (
+                     <div className="pt-2 border-t border-slate-800/50 mt-2 space-y-2">
+                        <p className="text-[9px] text-center text-emerald-400 font-medium">Backup exists in Cloud</p>
+                        <Button 
+                          variant="ghost" 
+                          className="w-full h-8 text-[10px] text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-lg"
+                          disabled={!vaultPassword || vaultSaving}
+                          onClick={async () => {
+                             setVaultSaving(true);
+                             try {
+                                const token = await user.getIdToken();
+                                const res = await fetch("/api/vault", { headers: { "Authorization": `Bearer ${token}` }});
+                                const data = await res.json();
+                                if (!data.exists) throw new Error("Vault not found");
+                                
+                                const privKeyJwk = await CryptoUtils.decryptWithPassword(data.vault, vaultPassword);
+                                localStorage.setItem("nova_private_key", privKeyJwk);
+                                
+                                toast.success("Key Restored! Refreshing chats...");
+                                setVaultPassword("");
+                                setTimeout(() => window.location.reload(), 1000);
+                             } catch(err) {
+                                toast.error("Incorrect password or error");
+                             } finally {
+                                setVaultSaving(false);
+                             }
+                          }}
+                        >
+                           Overwrite Local Key with Vault
+                        </Button>
+                     </div>
+                   )}
+
                 </div>
               </div>
 
