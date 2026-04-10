@@ -497,15 +497,22 @@ function DashboardContent() {
         setUser(u);
         loadSocialData(u);
 
-        // FCM Registration for PWA
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && (navigator as any).standalone === true);
-        if (isStandalone) {
-          MessagingUtils.initMessaging(u.uid);
-          // Register Messaging Service Worker explicitly if needed
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/firebase-messaging-sw.js')
-              .then(reg => console.log('Messaging SW registered:', reg.scope))
-              .catch(err => console.error('SW Registration failed:', err));
+        // FCM Registration Logic
+        if ('serviceWorker' in navigator) {
+          const isStandalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && (navigator as any).standalone === true);
+          
+          if (isStandalone) {
+            navigator.serviceWorker.register('/firebase-messaging-sw.js').then(async (registration) => {
+              console.log('Messaging SW registered:', registration.scope);
+              
+              // Wait for service worker to be ready
+              await navigator.serviceWorker.ready;
+              
+              const success = await MessagingUtils.initMessaging(u.uid, registration);
+              if (success) {
+                toast.success("Notifications enabled!", { description: "You will now receive message alerts in background." });
+              }
+            }).catch(err => console.error('SW Registration failed:', err));
           }
         }
       } else {
