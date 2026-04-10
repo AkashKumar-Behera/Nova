@@ -151,6 +151,7 @@ function DashboardContent() {
   // Interactive UI State
   const [lightboxMedia, setLightboxMedia] = useState<{url: string, fileName: string, scale: number, x: number, y: number} | null>(null);
   const lightboxDragRef = useRef<{startX: number, startY: number, originX: number, originY: number} | null>(null);
+  const lightboxImgRef = useRef<HTMLImageElement>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [friendPresence, setFriendPresence] = useState<{state: string, last_changed: number} | null>(null);
@@ -1291,26 +1292,44 @@ function DashboardContent() {
                 startX: e.clientX, startY: e.clientY,
                 originX: lightboxMedia.x, originY: lightboxMedia.y
               };
+              if (lightboxImgRef.current) {
+                lightboxImgRef.current.style.transition = 'none';
+              }
             }}
             onPointerMove={(e) => {
               if (!lightboxDragRef.current || lightboxMedia.scale <= 1) return;
+              e.preventDefault();
               const dx = e.clientX - lightboxDragRef.current.startX;
               const dy = e.clientY - lightboxDragRef.current.startY;
-              setLightboxMedia(prev => prev ? {...prev, x: lightboxDragRef.current!.originX + dx, y: lightboxDragRef.current!.originY + dy} : null);
+              
+              if (lightboxImgRef.current) {
+                lightboxImgRef.current.style.transform = `translate(${lightboxDragRef.current.originX + dx}px, ${lightboxDragRef.current.originY + dy}px) scale(${lightboxMedia.scale})`;
+              }
             }}
-            onPointerUp={() => { lightboxDragRef.current = null; }}
+            onPointerUp={(e) => {
+              if (lightboxDragRef.current && lightboxMedia.scale > 1) {
+                  const dx = e.clientX - lightboxDragRef.current.startX;
+                  const dy = e.clientY - lightboxDragRef.current.startY;
+                  setLightboxMedia(prev => prev ? {...prev, x: lightboxDragRef.current!.originX + dx, y: lightboxDragRef.current!.originY + dy} : null);
+              }
+              lightboxDragRef.current = null;
+              if (lightboxImgRef.current) {
+                  lightboxImgRef.current.style.transition = 'transform 0.2s ease';
+              }
+            }}
             onDoubleClick={() => setLightboxMedia(prev => prev
               ? prev.scale !== 1 ? {...prev, scale: 1, x: 0, y: 0} : {...prev, scale: 2, x: 0, y: 0}
               : null)}
           >
             <img
+              ref={lightboxImgRef}
               src={lightboxMedia.url}
               alt="Expanded media"
               draggable={false}
               className="max-h-[90vh] max-w-[90vw] object-contain shadow-2xl rounded-lg select-none"
               style={{
                 transform: `translate(${lightboxMedia.x}px, ${lightboxMedia.y}px) scale(${lightboxMedia.scale})`,
-                transition: lightboxDragRef.current ? 'none' : 'transform 0.2s ease',
+                transition: 'transform 0.2s ease',
                 willChange: 'transform',
               }}
             />
