@@ -49,7 +49,7 @@ export default function LoginPage() {
       const checkData = await checkRes.json();
       
       const hasRemoteKey = checkData.user?.publicKey || false; // This requires API update to return current state
-      const hasLocalKey = !!localStorage.getItem("nova_private_key");
+      const hasLocalKey = !!localStorage.getItem(`nova_private_key_${user.uid}`);
 
       if (hasRemoteKey && !hasLocalKey) {
         // 2. Try to fetch vault
@@ -86,7 +86,7 @@ export default function LoginPage() {
       // Extract public key from JWK (or re-generate from private if needed, but we saved the whole pair usually)
       // Actually our CryptoUtils exports full pairs. Let's assume ciphertext is the JWK of the private key.
       
-      localStorage.setItem("nova_private_key", privateKeyJwk);
+      localStorage.setItem(`nova_private_key_${pendingUser.uid}`, privateKeyJwk);
       // We also need the public key to stay in sync
       const privKeyObj = await CryptoUtils.importPrivateKey(privateKeyJwk);
       // In ECDH, we can't easily get the public key back from the private key object in WebCrypto without re-exporting? 
@@ -104,13 +104,13 @@ export default function LoginPage() {
 
   const finishAuth = async (user: any, token: string) => {
     // E2EE Key Management
-    let publicKeyBase64 = localStorage.getItem("nova_public_key");
+    let publicKeyBase64 = localStorage.getItem(`nova_public_key_${user.uid}`);
     if (!publicKeyBase64) {
       console.log("Generating new E2EE keys...");
       const keys = await CryptoUtils.generateKeyPair();
       const exported = await CryptoUtils.exportKeyPair(keys);
-      localStorage.setItem("nova_public_key", exported.publicKey);
-      localStorage.setItem("nova_private_key", exported.privateKey);
+      localStorage.setItem(`nova_public_key_${user.uid}`, exported.publicKey);
+      localStorage.setItem(`nova_private_key_${user.uid}`, exported.privateKey);
       publicKeyBase64 = exported.publicKey;
     }
 

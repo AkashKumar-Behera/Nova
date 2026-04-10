@@ -368,7 +368,7 @@ export default function DashboardPage() {
           if (!key) {
              const f = friends.find(fr => fr.uid === friendUid);
              if (f) {
-                const pkStr = localStorage.getItem("nova_private_key");
+                const pkStr = localStorage.getItem(`nova_private_key_${user.uid}`);
                 if (pkStr) {
                   const privKeyObj = await CryptoUtils.importPrivateKey(pkStr);
                   const pubKeyObj = await CryptoUtils.importPublicKey(f.publicKey);
@@ -1092,7 +1092,7 @@ export default function DashboardPage() {
             
             <div className="mb-4 p-2 bg-black/40 border border-slate-800 rounded-lg text-center flex justify-center">
                <code className="text-[10px] text-slate-500 font-mono">
-                  Key Signature: {typeof window !== 'undefined' ? (localStorage.getItem("nova_private_key")?.substring(10, 25) || "Missing") : ""}
+                  Key Signature: {typeof window !== 'undefined' ? (localStorage.getItem(`nova_private_key_${user?.uid}`)?.substring(10, 25) || "Missing") : ""}
                </code>
             </div>
 
@@ -1123,7 +1123,7 @@ export default function DashboardPage() {
                      onClick={async () => {
                         setVaultSaving(true);
                         try {
-                           const privKey = localStorage.getItem("nova_private_key");
+                           const privKey = localStorage.getItem(`nova_private_key_${user?.uid}`);
                            if (!privKey) throw new Error("Local key missing");
                            
                            const encrypted = await CryptoUtils.encryptWithPassword(privKey, vaultPassword);
@@ -1166,7 +1166,7 @@ export default function DashboardPage() {
                                 if (!data.exists) throw new Error("Vault not found");
                                 
                                 const privKeyJwk = await CryptoUtils.decryptWithPassword(data.vault, vaultPassword);
-                                localStorage.setItem("nova_private_key", privKeyJwk);
+                                localStorage.setItem(`nova_private_key_${user?.uid}`, privKeyJwk);
                                 
                                 toast.success("Key Restored! Refreshing chats...");
                                 setVaultPassword("");
