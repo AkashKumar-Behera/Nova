@@ -1088,8 +1088,14 @@ export default function DashboardPage() {
             <Button variant="ghost" size="icon" className="absolute top-4 right-4 text-slate-400 hover:text-white" onClick={() => setSettingsOpen(false)}>
               <X className="w-5 h-5" />
             </Button>
-            <h2 className="text-xl font-semibold mb-6 flex items-center gap-2"><Settings className="w-5 h-5 text-indigo-400"/> Settings</h2>
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2"><Settings className="w-5 h-5 text-indigo-400"/> Settings</h2>
             
+            <div className="mb-4 p-2 bg-black/40 border border-slate-800 rounded-lg text-center flex justify-center">
+               <code className="text-[10px] text-slate-500 font-mono">
+                  Key Signature: {typeof window !== 'undefined' ? (localStorage.getItem("nova_private_key")?.substring(10, 25) || "Missing") : ""}
+               </code>
+            </div>
+
             <div className="space-y-4">
               <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl">
                 <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
