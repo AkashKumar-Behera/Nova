@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { auth, db, rtdb, storage } from "@/lib/firebase-client";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { 
@@ -43,9 +43,14 @@ import {
   CheckCheck,
   ArchiveRestore,
   ShieldCheck,
-  Lock
+  Lock,
+  RefreshCw,
+  Mic,
+  Trash,
+  RotateCcw
 } from "lucide-react";
 import { toast } from "sonner";
+import { useSearchParams } from "next/navigation";
 import { CryptoUtils } from "@/lib/crypto-utils";
 import { LocalDB } from "@/lib/indexed-db";
 import { clsx, type ClassValue } from "clsx";
@@ -97,6 +102,19 @@ const EncryptedMedia = ({ msg, sharedKey, onOpenLightbox }: { msg: any, sharedKe
       />
     );
   }
+
+  if (msg.parsedContent?.type === 'voice') {
+    return (
+        <div className="flex items-center gap-3 p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20 min-w-[200px]">
+            <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center animate-pulse">
+                <Mic className="w-4 h-4 text-white" />
+            </div>
+            <audio controls src={mediaUrl} className="h-8 w-40 filter invert hue-rotate-180 opacity-70" />
+            <span className="text-[10px] text-indigo-400 font-bold whitespace-nowrap">Voice</span>
+        </div>
+    );
+  }
+
   
   return (
     <a href={mediaUrl} download={msg.parsedContent?.fileName} className="flex items-center gap-2 p-3 bg-black/40 border border-slate-700 rounded-xl hover:bg-slate-800 transition-colors">
@@ -109,7 +127,7 @@ const EncryptedMedia = ({ msg, sharedKey, onOpenLightbox }: { msg: any, sharedKe
   );
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
   const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -143,6 +161,17 @@ export default function DashboardPage() {
   const [vaultPassword, setVaultPassword] = useState("");
   const [vaultSaving, setVaultSaving] = useState(false);
   
+  // Voice Recording States
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingIntervalRef = useRef<any>(null);
+  
+  // Interaction states
+  const [messageContextMenu, setMessageContextMenu] = useState<{ id: string, x: number, y: number } | null>(null);
+  const longPressTimer = useRef<any>(null);
+  
   // Global Decryption & Presence Caches
   const sharedKeysCache = useRef<Record<string, CryptoKey>>({});
   const [sidebarPreviews, setSidebarPreviews] = useState<Record<string, { last: any, unread: number }>>({});
@@ -154,26 +183,62 @@ export default function DashboardPage() {
 
   const chatId = user && selectedFriend ? [user.uid, selectedFriend.uid].sort().join('-') : null;
 
+  const searchParams = useSearchParams();
+
+  // Sync URL ?chat=uid with selectedFriend
+  useEffect(() => {
+    const chatUid = searchParams.get('chat');
+    if (chatUid) {
+      const friend = friends.find(f => f.uid === chatUid);
+      if (friend) {
+        handleSelectFriend(friend);
+        if (window.innerWidth < 768) setSidebarOpen(false);
+      }
+    } else {
+      setSelectedFriend(null);
+      setSharedKey(null);
+      if (window.innerWidth < 768) setSidebarOpen(true);
+    }
+  }, [searchParams, friends]);
+
+  // Handle hardware/browser back button
+  useEffect(() => {
+    const handlePopState = () => {
+      if (selectedFriend) {
+        // Navigation back simply triggers the popstate, 
+        // our searchParams useEffect will handle cleaning state.
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [selectedFriend]);
+
+  const handleSelectFriendWithURL = (friend: any) => {
+    router.push(`/dashboard?chat=${friend.uid}`);
+  };
+
+  const handleLogout = () => {
+    if (confirm("Are you sure you want to log out? Your encryption keys are stored safely in the vault.")) {
+      auth.signOut();
+    }
+  };
+
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 768) {
-        if (!selectedFriend) setSidebarOpen(true);
+        if (!selectedFriend) {
+          setSidebarOpen(true);
+        } else {
+          setSidebarOpen(false);
+        }
       } else {
         setSidebarOpen(true);
       }
     };
     
-    // Initial check
     handleResize();
-    
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [selectedFriend]);
-
-  useEffect(() => {
-    if (window.innerWidth < 768 && selectedFriend) {
-      setSidebarOpen(false);
-    }
   }, [selectedFriend]);
 
   // Handle RTDB Typing Indication sync
@@ -651,9 +716,131 @@ export default function DashboardPage() {
         status: 'sent'
       });
       toast.success("Securely added!");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+            const blob = items[i].getAsFile();
+            if (blob) {
+                // Manually trigger upload
+                const fileEvent = { target: { files: [blob] } } as any;
+                handleFileUpload(fileEvent);
+            }
+        }
+    }
+  };
+
+  const onMessageAction = (action: string, msg: any) => {
+    setMessageContextMenu(null);
+    if (action === 'copy') {
+        if (msg.parsedContent?.type === 'text') {
+            navigator.clipboard.writeText(msg.parsedContent.text);
+            toast.success("Copied to clipboard");
+        }
+    } else if (action === 'delete') {
+        deleteMessage(msg.id);
+    } else if (action === 'edit') {
+        startEdit(msg);
+    } else if (action === 'forward' || action === 'star' || action === 'pin' || action === 'info' || action === 'reply') {
+        toast.info(`${action.charAt(0).toUpperCase() + action.slice(1)} feature coming soon!`);
+    }
+  };
+
+  const handleLongPressStart = (e: React.PointerEvent, msgId: string) => {
+    const x = e.clientX;
+    const y = e.clientY;
+    longPressTimer.current = setTimeout(() => {
+        setMessageContextMenu({ id: msgId, x, y });
+        if (navigator.vibrate) navigator.vibrate(50);
+    }, 600);
+  };
+
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  };
+
+  // Voice Recording Handlers
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        
+        // Handle upload (similar to file upload but type is audio)
+        if (audioBlob.size > 0 && selectedFriend && sharedKey) {
+            handleVoiceUpload(audioBlob);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Mic access denied:", err);
+      toast.error("Microphone access denied");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      clearInterval(recordingIntervalRef.current);
+    }
+  };
+
+  const handleVoiceUpload = async (blob: Blob) => {
+    if (!user || !selectedFriend || !sharedKey || !chatId) return;
+    setUploading(true);
+    toast.info("Encrypting voice message...");
+    try {
+      const buffer = await blob.arrayBuffer();
+      const { ciphertext, iv: binaryIv } = await CryptoUtils.encryptBinary(sharedKey, buffer);
+      
+      const fileId = `voice-${Date.now()}`;
+      const sRef = storageRef(storage, `media/${fileId}`);
+      await uploadBytes(sRef, new Blob([ciphertext]));
+      const url = await getDownloadURL(sRef);
+      
+      const payload = JSON.stringify({
+        type: 'voice',
+        url,
+        duration: recordingTime,
+        mimeType: 'audio/webm',
+        binaryIv: CryptoUtils.arrayBufferToBase64(binaryIv.buffer as ArrayBuffer)
+      });
+      
+      const { ciphertext: msgCiphertext, iv: msgIv } = await CryptoUtils.encryptMessage(sharedKey, payload);
+      await addDoc(collection(db, "messages"), {
+        from: user.uid,
+        to: selectedFriend.uid,
+        participants: [user.uid, selectedFriend.uid],
+        ciphertext: CryptoUtils.arrayBufferToBase64(msgCiphertext),
+        iv: CryptoUtils.arrayBufferToBase64(msgIv.buffer as ArrayBuffer),
+        timestamp: serverTimestamp(),
+        status: 'sent'
+      });
+      toast.success("Voice message sent!");
     } catch (err: any) {
       console.error(err);
-      toast.error(err.message || "Upload securely failed");
+      toast.error("Failed to send voice note");
     } finally {
       setUploading(false);
     }
@@ -663,18 +850,12 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-screen bg-[#0a0a0c] text-slate-200 overflow-hidden font-sans relative w-full">
-      {/* Mobile Sidebar Overlay */}
-      {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      {/* Mobile Sidebar Overlay Removed for Swipe/Native Navigation feel */}
 
       {/* Sidebar - Responsive */}
       <aside className={cn(
-        "fixed inset-y-0 left-0 w-[85%] max-w-[320px] md:w-80 border-r border-slate-800/50 bg-[#0f0f12] flex flex-col z-30 transition-transform duration-300 md:relative md:translate-x-0 shadow-2xl md:shadow-none",
-        sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        "fixed inset-0 md:relative md:inset-auto md:w-80 border-r border-slate-800/50 bg-[#0f0f12] flex flex-col z-30 transition-transform duration-500 ease-in-out shadow-2xl md:shadow-none",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       )}>
         <div className="p-6 flex items-center justify-between border-b border-slate-800/30">
           <div className="flex items-center gap-2">
@@ -755,7 +936,7 @@ export default function DashboardPage() {
                   return (
                   <div 
                     key={f.uid} 
-                    onClick={() => handleSelectFriend(f)}
+                    onClick={() => handleSelectFriendWithURL(f)}
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border border-transparent",
                       selectedFriend?.uid === f.uid ? "bg-indigo-500/10 border-indigo-500/30" : "hover:bg-slate-800/40"
@@ -809,10 +990,13 @@ export default function DashboardPage() {
           </div>
           
           <div className="flex gap-1">
+            <Button variant="ghost" size="icon" className="text-slate-400 hover:text-indigo-400" onClick={() => window.location.reload()}>
+              <RefreshCw className="w-4 h-4" />
+            </Button>
             <Button variant="ghost" size="icon" className="text-slate-400 hover:text-white" onClick={() => setSettingsOpen(true)}>
               <Settings className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="text-slate-400 hover:text-red-400" onClick={() => auth.signOut()}>
+            <Button variant="ghost" size="icon" className="text-slate-400 hover:text-red-400" onClick={handleLogout}>
               <LogOut className="w-4 h-4" />
             </Button>
           </div>
@@ -820,13 +1004,16 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col bg-[#050507] relative">
+      <main className={cn(
+        "flex-1 flex flex-col bg-[#050507] relative transition-all duration-500 ease-in-out",
+        !sidebarOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"
+      )}>
         {selectedFriend ? (
           <>
             {/* Chat Header */}
             <header className="h-16 border-b border-slate-800/50 bg-[#0f0f12]/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-6 z-10">
               <div className="flex items-center gap-2 md:gap-4">
-                <Button variant="ghost" size="icon" className="md:hidden text-slate-400" onClick={() => setSidebarOpen(true)}>
+                <Button variant="ghost" size="icon" className="md:hidden text-slate-400" onClick={() => router.push('/dashboard')}>
                   <MoreVertical className="w-5 h-5 rotate-90" />
                 </Button>
                 <Avatar className="w-8 h-8 md:w-9 md:h-9 border border-indigo-500/20">
@@ -853,7 +1040,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-1 md:gap-3">
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400"><Phone className="w-4 h-4" /></Button>
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 md:flex hidden"><Video className="w-4 h-4" /></Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400" onClick={() => setSelectedFriend(null)}>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400" onClick={() => router.push('/dashboard')}>
                   <LogOut className="w-4 h-4 text-red-400" />
                 </Button>
               </div>
@@ -879,6 +1066,14 @@ export default function DashboardPage() {
                       "flex w-full mb-4 animate-in fade-in slide-in-from-bottom-2 duration-300",
                       isMine ? "justify-end" : "justify-start"
                     )}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        setMessageContextMenu({ id: msg.id, x: e.clientX, y: e.clientY });
+                    }}
+                    onPointerDown={(e) => handleLongPressStart(e, msg.id)}
+                    onPointerUp={handleLongPressEnd}
+                    onPointerMove={handleLongPressEnd}
+                    onPointerLeave={handleLongPressEnd}
                   >
                     {isDeleted ? (
                       <div className="bg-[#16161c] border border-slate-800 border-dashed rounded-2xl p-3 md:px-4 md:py-2 text-xs text-slate-500 italic flex items-center gap-2">
@@ -886,20 +1081,6 @@ export default function DashboardPage() {
                       </div>
                     ) : (
                       <div className="relative group flex items-center">
-                        {/* Action Menu (Left side for sender) */}
-                        {isMine && !isDeleted && (
-                          <div className="absolute right-full mr-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 backdrop-blur-md rounded-full shadow-lg border border-slate-700/50 px-2 py-1 flex items-center gap-1 z-10">
-                            {msg.parsedContent?.type === 'text' && (
-                              <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-indigo-400" onClick={() => startEdit(msg)}>
-                                <Edit2 className="w-3 h-3" />
-                              </Button>
-                            )}
-                            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-300 hover:text-red-400" onClick={() => deleteMessage(msg.id)}>
-                              <Trash2 className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        )}
-
                         <div 
                           className={cn(
                             "max-w-[100%] w-fit rounded-2xl text-[13px] md:text-sm shadow-xl break-words whitespace-pre-wrap flex flex-col gap-1 relative",
@@ -976,45 +1157,62 @@ export default function DashboardPage() {
                    size="icon" 
                    className="text-slate-500 hover:text-indigo-400"
                    onClick={() => fileInputRef.current?.click()}
-                   disabled={uploading}
+                   disabled={uploading || isRecording}
                  >
                    {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
                  </Button>
                  
                  <div className="flex-1 relative">
-                    <Input 
-                      value={messageInput}
-                      onChange={handleTyping}
-                      onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                      placeholder={
-                        editingMessageId 
-                          ? "Editing message..." 
-                          : uploading 
-                            ? "Locking & Uploading file..." 
-                            : `Message ${selectedFriend.displayName}...`
-                      }
-                      disabled={uploading}
-                      className="bg-black/50 border-slate-800 focus:border-indigo-500/50 rounded-2xl h-11 pr-12 text-sm"
-                    />
-                    {editingMessageId && (
-                      <Button
-                        variant="ghost" 
-                        size="icon"
-                        onClick={() => { setEditingMessageId(null); setMessageInput(""); }}
-                        className="absolute right-10 top-1 h-9 w-9 text-slate-400 hover:text-red-400"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
+                    {isRecording ? (
+                        <div className="flex-1 h-11 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl flex items-center px-4 gap-3 animate-pulse">
+                            <div className="w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
+                            <span className="text-xs font-mono text-indigo-400">Recording {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</span>
+                            <div className="flex-1 text-center text-[10px] text-slate-500 italic">Speak now...</div>
+                        </div>
+                    ) : (
+                        <Input 
+                            value={messageInput}
+                            onChange={handleTyping}
+                            onPaste={handlePaste}
+                            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                            placeholder={
+                                editingMessageId 
+                                ? "Editing message..." 
+                                : uploading 
+                                    ? "Locking & Uploading file..." 
+                                    : `Message ${selectedFriend?.displayName}...`
+                            }
+                            disabled={uploading}
+                            className="bg-black/50 border-slate-800 focus:border-indigo-500/50 rounded-2xl h-11 pr-12 text-sm"
+                        />
                     )}
-                    <Button 
-                      size="icon" 
-                      onClick={sendMessage}
-                      disabled={!messageInput.trim() || uploading}
-                      className="absolute right-1 top-1 h-9 w-9 bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all"
-                    >
-                      <Send className="w-4 h-4" />
-                    </Button>
+                    {editingMessageId && !isRecording && (
+                        <Button
+                            variant="ghost" 
+                            size="icon"
+                            onClick={() => { setEditingMessageId(null); setMessageInput(""); }}
+                            className="absolute right-10 top-1 h-9 w-9 text-slate-400 hover:text-red-400"
+                        >
+                            <X className="w-4 h-4" />
+                        </Button>
+                    )}
                  </div>
+
+                 <Button 
+                   variant="ghost" 
+                   size="icon"
+                   className={cn(
+                       "h-11 w-11 rounded-2xl transition-all shadow-lg shrink-0",
+                       isRecording ? "bg-red-500 text-white hover:bg-red-600" : "bg-indigo-600 text-white hover:bg-indigo-700"
+                   )}
+                   onClick={() => {
+                       if (isRecording) stopRecording();
+                       else if (messageInput.trim() || editingMessageId) sendMessage();
+                       else startRecording();
+                   }}
+                 >
+                   {isRecording ? <div className="w-3 h-3 bg-white rounded-sm" /> : (messageInput.trim() || editingMessageId ? <Send className="w-5 h-5" /> : <Mic className="w-5 h-5" />)}
+                 </Button>
                </div>
             </div>
           </>
@@ -1120,6 +1318,50 @@ export default function DashboardPage() {
 
           <div className="absolute bottom-4 w-full text-center text-[10px] text-slate-600">
             Double-tap to reset · Drag to pan · Pinch/scroll to zoom
+          </div>
+        </div>
+      )}
+
+      {/* Message Context Menu */}
+      {messageContextMenu && (
+        <div 
+          className="fixed inset-0 z-[200]" 
+          onClick={() => setMessageContextMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setMessageContextMenu(null); }}
+        >
+          <div 
+            className="absolute bg-[#16161c]/90 backdrop-blur-2xl border border-slate-700/50 rounded-2xl shadow-2xl p-2 flex flex-col min-w-[160px] animate-in zoom-in-95 duration-200 origin-top-left"
+            style={{ 
+                left: Math.min(messageContextMenu.x, window.innerWidth - 180), 
+                top: Math.min(messageContextMenu.y, window.innerHeight - 300) 
+            }}
+          >
+            {[
+                { label: 'Reply', action: 'reply', icon: RotateCcw },
+                { label: 'Forward', action: 'forward', icon: Send },
+                { label: 'Copy', action: 'copy', icon: Download },
+                { label: 'Edit', action: 'edit', icon: Edit2, condition: (m: any) => m.from === user.uid && m.parsedContent?.type === 'text' },
+                { label: 'Star', action: 'star', icon: Settings },
+                { label: 'Info', action: 'info', icon: MessageSquare },
+                { label: 'Pin', action: 'pin', icon: Lock },
+                { label: 'Delete', action: 'delete', icon: Trash, danger: true, condition: (m: any) => m.from === user.uid }
+            ].map(item => {
+                const msg = messages.find(m => m.id === messageContextMenu.id);
+                if (item.condition && !item.condition(msg)) return null;
+                return (
+                    <button
+                        key={item.label}
+                        onClick={(e) => { e.stopPropagation(); onMessageAction(item.action, msg); }}
+                        className={cn(
+                            "flex items-center gap-3 w-full px-4 py-2.5 rounded-xl text-xs font-medium transition-colors",
+                            item.danger ? "text-red-400 hover:bg-red-500/10" : "text-slate-200 hover:bg-white/5"
+                        )}
+                    >
+                        <item.icon className="w-3.5 h-3.5" />
+                        {item.label}
+                    </button>
+                );
+            })}
           </div>
         </div>
       )}
@@ -1273,5 +1515,13 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-[#0a0a0c]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }
