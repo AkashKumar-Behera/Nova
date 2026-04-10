@@ -47,7 +47,8 @@ import {
   RefreshCw,
   Mic,
   Trash,
-  RotateCcw
+  RotateCcw,
+  ArrowDown
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
@@ -179,8 +180,10 @@ function DashboardContent() {
   const [friendsPresence, setFriendsPresence] = useState<Record<string, any>>({});
   
   const scrollRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   const chatId = user && selectedFriend ? [user.uid, selectedFriend.uid].sort().join('-') : null;
 
@@ -352,8 +355,21 @@ function DashboardContent() {
     const fetchChat = async () => {
       const chats = await LocalDB.getChat(chatId);
       if (isMounted) {
+         // Identify if the last message is ours or if we're already at the bottom
+         const atBottom = chatContainerRef.current ? (chatContainerRef.current.scrollHeight - chatContainerRef.current.scrollTop - chatContainerRef.current.clientHeight < 150) : true;
+         const lastMsgMine = chats.length > 0 && chats[chats.length - 1].from === user?.uid;
+         
          setMessages([...chats]);
-         setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+
+         setTimeout(() => {
+             if (!chatContainerRef.current) return;
+             // If we just opened the chat, or we're at bottom, or we sent a message: scroll to bottom
+             if (chats.length !== messages.length && (atBottom || lastMsgMine)) {
+                 chatContainerRef.current.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
+             } else if (messages.length === 0) { // first load
+                 chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+             }
+         }, 50);
       }
     };
     fetchChat();
@@ -1048,7 +1064,15 @@ function DashboardContent() {
             </header>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+            <div 
+              ref={chatContainerRef}
+              onScroll={(e) => {
+                 const target = e.currentTarget;
+                 const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 150;
+                 setShowScrollDown(!isAtBottom);
+              }}
+              className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] select-text"
+            >
               <div className="flex flex-col items-center justify-center py-8">
                 <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[10px] text-indigo-400 font-medium">
                   Messages are end-to-end encrypted
@@ -1140,6 +1164,18 @@ function DashboardContent() {
               )}
               <div ref={scrollRef} />
             </div>
+
+            {/* Scroll to Bottom Button */}
+            {showScrollDown && (
+               <Button 
+                 onClick={() => chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' })}
+                 className="absolute bottom-20 right-4 rounded-full w-10 h-10 shadow-2xl bg-[#16161c]/80 backdrop-blur-md text-indigo-400 border border-slate-700/50 hover:bg-[#1f1f26] z-50 animate-in fade-in zoom-in"
+                 variant="ghost"
+                 size="icon"
+               >
+                 <ArrowDown className="w-5 h-5" />
+               </Button>
+            )}
 
             {/* Input Area */}
             <div className="p-4 bg-[#0f0f12]/80 backdrop-blur-md border-t border-slate-800/50">
@@ -1320,6 +1356,15 @@ function DashboardContent() {
             onDoubleClick={() => setLightboxMedia(prev => prev
               ? prev.scale !== 1 ? {...prev, scale: 1, x: 0, y: 0} : {...prev, scale: 2, x: 0, y: 0}
               : null)}
+            onWheel={(e) => {
+                e.preventDefault();
+                const zoomFactor = e.deltaY < 0 ? 0.15 : -0.15;
+                setLightboxMedia(prev => {
+                    if (!prev) return prev;
+                    const newScale = Math.max(0.5, Math.min(5, prev.scale + zoomFactor));
+                    return { ...prev, scale: newScale };
+                });
+            }}
           >
             <img
               ref={lightboxImgRef}
