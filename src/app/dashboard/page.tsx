@@ -517,7 +517,7 @@ export default function DashboardPage() {
       return;
     }
     try {
-      const myPrivKeyBase64 = localStorage.getItem("nova_private_key");
+      const myPrivKeyBase64 = localStorage.getItem(`nova_private_key_${user.uid}`);
       if (!myPrivKeyBase64) throw new Error("Key missing");
       const myPrivKey = await CryptoUtils.importPrivateKey(myPrivKeyBase64);
       const theirPubKey = await CryptoUtils.importPublicKey(friend.publicKey);
