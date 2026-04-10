@@ -305,6 +305,10 @@ function DashboardContent() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [friendPresence, setFriendPresence] = useState<{state: string, last_changed: number} | null>(null);
+
+  // Background state tracker for notifications
+  const activeChatIdRef = useRef<string | null>(null);
+  useEffect(() => { activeChatIdRef.current = selectedFriend?.uid || null; }, [selectedFriend]);
   const [friendActiveChat, setFriendActiveChat] = useState<string | null>(null);
   
   // Security Vault States
@@ -427,6 +431,12 @@ function DashboardContent() {
   useEffect(() => {
     if (!user) return;
     
+    // PWA Notification Permission Initial Check
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && (navigator as any).standalone === true);
+    if (isStandalone && "Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+
     // Set Active Chat
     const activeChatRef = dbRef(rtdb, `activeChat/${user.uid}`);
     if (selectedFriend) {
@@ -626,6 +636,41 @@ function DashboardContent() {
           await LocalDB.saveMessage(cid, mBase);
           activeChatUpdatedId = cid;
           uiUpdatedPreviews = true;
+
+          // Native Notify
+          if (change.type === 'added' && mBase.from !== user.uid) {
+             const now = Date.now() / 1000;
+             const msgTime = mBase.timestamp?.seconds || now;
+             if ((now - msgTime) < 10) { 
+                 const isActiveChatAndFocused = (mBase.from === activeChatIdRef.current) && !document.hidden;
+                 if (!isActiveChatAndFocused) {
+                     try {
+                         const audio = new Audio("https://actions.google.com/sounds/v1/water/water_drop.ogg");
+                         audio.play().catch(() => null);
+                     } catch(e) {}
+                     
+                     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && (navigator as any).standalone === true);
+                     if (isStandalone && "Notification" in window && Notification.permission === 'granted') {
+                         const fData = friends.find(fr => fr.uid === mBase.from);
+                         let bodyText = "New message";
+                         if (mBase.parsedContent?.type === 'text') bodyText = mBase.parsedContent.text;
+                         else if (mBase.parsedContent?.type === 'image') bodyText = "📷 Photo";
+                         else if (mBase.parsedContent?.type === 'voice') bodyText = "🎤 Voice Message";
+                         else if (mBase.parsedContent?.type === 'file') bodyText = "📎 Document";
+                         
+                         const n = new Notification(fData?.displayName || "Nova Chat", {
+                             body: bodyText,
+                             icon: fData?.photoURL || '/icon-192x192.png',
+                             tag: `chat-${mBase.from}`
+                         });
+                         n.onclick = () => {
+                             window.focus();
+                             n.close();
+                         };
+                     }
+                 }
+             }
+          }
         } catch (err: any) {
           // console.error("BG Decrypt Failed", err);
           mBase.parsedContent = { type: 'text', text: `[Decryption Error] ${err.message || err.toString()}` };
