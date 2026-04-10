@@ -5,6 +5,11 @@ localforage.config({
   storeName: 'messages'
 });
 
+const keysStore = localforage.createInstance({
+  name: 'NovaKeysDB',
+  storeName: 'keys'
+});
+
 export const LocalDB = {
   getChat: async (chatId: string) => {
     const data = await localforage.getItem(`chat_${chatId}`);
@@ -20,8 +25,6 @@ export const LocalDB = {
       chats.push(message); 
     }
     chats.sort((a, b) => {
-      // Handle firebase timestamp objects or local timestamps
-      // If timestamp is null (Pending server write), assume current time
       const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || Date.now());
       const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || Date.now());
       return tA - tB;
@@ -42,6 +45,14 @@ export const LocalDB = {
     const chats = await LocalDB.getChat(chatId);
     const updated = chats.filter((m) => m.id !== messageId);
     await localforage.setItem(`chat_${chatId}`, updated);
+  },
+  
+  // Security Keys Storage
+  savePrivateKey: async (uid: string, key: string) => {
+    await keysStore.setItem(`priv_key_${uid}`, key);
+  },
+  getPrivateKey: async (uid: string) => {
+    return await keysStore.getItem(`priv_key_${uid}`) as string | null;
   },
   
   exportFullBackup: async () => {

@@ -54,6 +54,7 @@ import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
 import { CryptoUtils } from "@/lib/crypto-utils";
 import { LocalDB } from "@/lib/indexed-db";
+import { MessagingUtils } from "@/lib/messaging";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -475,17 +476,38 @@ function DashboardContent() {
   }, [friends]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
-        // Enforce E2EE key existence before allowing dashboard access
-        const hasLocalKey = !!localStorage.getItem(`nova_private_key_${u.uid}`);
-        if (!hasLocalKey) {
+        // Migration: Move keys from localStorage to IndexedDB for Service Worker access
+        const oldKey = localStorage.getItem(`nova_private_key_${u.uid}`);
+        const indexedKey = await LocalDB.getPrivateKey(u.uid);
+        
+        if (oldKey && !indexedKey) {
+            await LocalDB.savePrivateKey(u.uid, oldKey);
+            console.log("E2EE Keys migrated to IndexedDB.");
+        }
+
+        const hasKey = !!(oldKey || indexedKey);
+        if (!hasKey) {
           console.warn("User authenticated but missing local E2EE keys. Redirecting to login/setup flow.");
           router.push("/login");
           return;
         }
+
         setUser(u);
         loadSocialData(u);
+
+        // FCM Registration for PWA
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && (navigator as any).standalone === true);
+        if (isStandalone) {
+          MessagingUtils.initMessaging(u.uid);
+          // Register Messaging Service Worker explicitly if needed
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/firebase-messaging-sw.js')
+              .then(reg => console.log('Messaging SW registered:', reg.scope))
+              .catch(err => console.error('SW Registration failed:', err));
+          }
+        }
       } else {
         router.push("/login");
       }
@@ -793,7 +815,11 @@ function DashboardContent() {
       return;
     }
     try {
-      const myPrivKeyBase64 = localStorage.getItem(`nova_private_key_${user.uid}`);
+      let myPrivKeyBase64 = await LocalDB.getPrivateKey(user.uid);
+      if (!myPrivKeyBase64) {
+          myPrivKeyBase64 = localStorage.getItem(`nova_private_key_${user.uid}`);
+      }
+      
       if (!myPrivKeyBase64) throw new Error("Key missing");
       const myPrivKey = await CryptoUtils.importPrivateKey(myPrivKeyBase64);
       const theirPubKey = await CryptoUtils.importPublicKey(friend.publicKey);
@@ -802,6 +828,33 @@ function DashboardContent() {
       setSelectedFriend(friend);
     } catch (err) {
       toast.error("Secure connection failed");
+    }
+  };
+
+  const triggerNotification = async (ciphertext: string, iv: string, recipient: any) => {
+    if (!recipient.fcmToken || !user) return;
+    try {
+      // Get our own public key for the recipient to derive shared key in background
+      const userData = friends.find(f => f.uid === user.uid) || { publicKey: localStorage.getItem(`nova_public_key_${user.uid}`) };
+      const myPublicKey = userData?.publicKey;
+      if (!myPublicKey) return;
+
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fcmToken: recipient.fcmToken,
+          ciphertext,
+          iv,
+          senderUid: user.uid,
+          senderPublicKey: myPublicKey,
+          senderName: user.displayName,
+          senderPhoto: user.photoURL,
+          recipientUid: recipient.uid
+        })
+      });
+    } catch (e) {
+      console.error("Notify trigger failed:", e);
     }
   };
 
@@ -829,15 +882,20 @@ function DashboardContent() {
         toast.success("Message edited securely");
       } else {
         // Sending a new message
+        const { ciphertext: b64Cipher, iv: b64Iv } = { 
+            ciphertext: CryptoUtils.arrayBufferToBase64(ciphertext), 
+            iv: CryptoUtils.arrayBufferToBase64(iv.buffer as ArrayBuffer) 
+        };
         await addDoc(collection(db, "messages"), {
           from: user.uid,
           to: selectedFriend.uid,
           participants: [user.uid, selectedFriend.uid],
-          ciphertext: CryptoUtils.arrayBufferToBase64(ciphertext),
-          iv: CryptoUtils.arrayBufferToBase64(iv.buffer as ArrayBuffer),
+          ciphertext: b64Cipher,
+          iv: b64Iv,
           timestamp: serverTimestamp(),
           status: 'sent',
         });
+        triggerNotification(b64Cipher, b64Iv, selectedFriend);
       }
     } catch (err: any) {
       console.error("Modify error: ", err);
@@ -917,15 +975,19 @@ function DashboardContent() {
       });
       
       const { ciphertext: msgCiphertext, iv: msgIv } = await CryptoUtils.encryptMessage(sharedKey, payload);
+      const b64MsgCipher = CryptoUtils.arrayBufferToBase64(msgCiphertext);
+      const b64MsgIv = CryptoUtils.arrayBufferToBase64(msgIv.buffer as ArrayBuffer);
+
       await addDoc(collection(db, "messages"), {
         from: user.uid,
         to: selectedFriend.uid,
         participants: [user.uid, selectedFriend.uid],
-        ciphertext: CryptoUtils.arrayBufferToBase64(msgCiphertext),
-        iv: CryptoUtils.arrayBufferToBase64(msgIv.buffer as ArrayBuffer),
+        ciphertext: b64MsgCipher,
+        iv: b64MsgIv,
         timestamp: serverTimestamp(),
         status: 'sent'
       });
+      triggerNotification(b64MsgCipher, b64MsgIv, selectedFriend);
       toast.success("Securely added!");
     } finally {
       setUploading(false);
@@ -1039,15 +1101,19 @@ function DashboardContent() {
       });
       
       const { ciphertext: msgCiphertext, iv: msgIv } = await CryptoUtils.encryptMessage(sharedKey, payload);
+      const b64MsgCipher = CryptoUtils.arrayBufferToBase64(msgCiphertext);
+      const b64MsgIv = CryptoUtils.arrayBufferToBase64(msgIv.buffer as ArrayBuffer);
+
       await addDoc(collection(db, "messages"), {
         from: user.uid,
         to: selectedFriend.uid,
         participants: [user.uid, selectedFriend.uid],
-        ciphertext: CryptoUtils.arrayBufferToBase64(msgCiphertext),
-        iv: CryptoUtils.arrayBufferToBase64(msgIv.buffer as ArrayBuffer),
+        ciphertext: b64MsgCipher,
+        iv: b64MsgIv,
         timestamp: serverTimestamp(),
         status: 'sent'
       });
+      triggerNotification(b64MsgCipher, b64MsgIv, selectedFriend);
       toast.success("Voice message sent!");
     } catch (err: any) {
       console.error(err);

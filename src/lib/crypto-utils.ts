@@ -11,7 +11,7 @@ export class CryptoUtils {
    * Generates a new ECDH key pair for the user
    */
   static async generateKeyPair(): Promise<CryptoKeyPair> {
-    return await window.crypto.subtle.generateKey(
+    return await crypto.subtle.generateKey(
       { name: this.ALGORITHM, namedCurve: this.CURVE },
       true, // extractable
       ["deriveKey"]
@@ -22,8 +22,8 @@ export class CryptoUtils {
    * Exports the entire key pair to Base64/JWK for storage
    */
   static async exportKeyPair(pair: CryptoKeyPair): Promise<{ publicKey: string; privateKey: string }> {
-    const pub = await window.crypto.subtle.exportKey("jwk", pair.publicKey);
-    const priv = await window.crypto.subtle.exportKey("jwk", pair.privateKey);
+    const pub = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const priv = await crypto.subtle.exportKey("jwk", pair.privateKey);
     return {
       publicKey: btoa(JSON.stringify(pub)),
       privateKey: btoa(JSON.stringify(priv))
@@ -35,7 +35,7 @@ export class CryptoUtils {
    */
   static async importPrivateKey(base64: string): Promise<CryptoKey> {
     const jwk = JSON.parse(atob(base64));
-    return await window.crypto.subtle.importKey(
+    return await crypto.subtle.importKey(
       "jwk",
       jwk,
       { name: this.ALGORITHM, namedCurve: this.CURVE },
@@ -49,7 +49,7 @@ export class CryptoUtils {
    */
   static async importPublicKey(base64: string): Promise<CryptoKey> {
     const jwk = JSON.parse(atob(base64));
-    return await window.crypto.subtle.importKey(
+    return await crypto.subtle.importKey(
       "jwk",
       jwk,
       { name: this.ALGORITHM, namedCurve: this.CURVE },
@@ -62,7 +62,7 @@ export class CryptoUtils {
    * Derives a symmetric AES key from local private key and remote public key
    */
   static async deriveSharedKey(privateKey: CryptoKey, publicKey: CryptoKey): Promise<CryptoKey> {
-    return await window.crypto.subtle.deriveKey(
+    return await crypto.subtle.deriveKey(
       { name: this.ALGORITHM, public: publicKey },
       privateKey,
       { name: this.AES_ALGO, length: 256 },
@@ -91,8 +91,8 @@ export class CryptoUtils {
    * Encrypts pure binary data (ArrayBuffer) for file uploads
    */
   static async encryptBinary(key: CryptoKey, buffer: ArrayBuffer): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const ciphertext = await window.crypto.subtle.encrypt(
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
       { name: this.AES_ALGO, iv },
       key,
       buffer
@@ -104,7 +104,7 @@ export class CryptoUtils {
    * Decrypts binary data downloaded from storage
    */
   static async decryptBinary(key: CryptoKey, ciphertext: ArrayBuffer, iv: Uint8Array): Promise<ArrayBuffer> {
-    return await window.crypto.subtle.decrypt(
+    return await crypto.subtle.decrypt(
       { name: this.AES_ALGO, iv: iv as unknown as ArrayBuffer },
       key,
       ciphertext
@@ -116,7 +116,7 @@ export class CryptoUtils {
    */
   static async deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
     const encoder = new TextEncoder();
-    const baseKey = await window.crypto.subtle.importKey(
+    const baseKey = await crypto.subtle.importKey(
       "raw",
       encoder.encode(password),
       "PBKDF2",
@@ -124,7 +124,7 @@ export class CryptoUtils {
       ["deriveKey"]
     );
 
-    return await window.crypto.subtle.deriveKey(
+    return await crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
         salt: salt.buffer as ArrayBuffer,
@@ -142,12 +142,12 @@ export class CryptoUtils {
    * Encrypts a string (e.g. Private Key) using a password
    */
   static async encryptWithPassword(data: string, password: string): Promise<{ ciphertext: string; iv: string; salt: string }> {
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
+    const salt = crypto.getRandomValues(new Uint8Array(16));
     const encryptionKey = await this.deriveKeyFromPassword(password, salt);
     
     const encoder = new TextEncoder();
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const ciphertext = await window.crypto.subtle.encrypt(
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
       { name: this.AES_ALGO, iv },
       encryptionKey,
       encoder.encode(data)
@@ -170,7 +170,7 @@ export class CryptoUtils {
     const ciphertext = this.base64ToArrayBuffer(encrypted.ciphertext);
     const iv = this.base64ToArrayBuffer(encrypted.iv);
     
-    const decrypted = await window.crypto.subtle.decrypt(
+    const decrypted = await crypto.subtle.decrypt(
       { name: this.AES_ALGO, iv: iv as ArrayBuffer },
       encryptionKey,
       ciphertext
