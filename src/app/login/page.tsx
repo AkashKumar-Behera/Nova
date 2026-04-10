@@ -25,18 +25,24 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) router.push("/dashboard");
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // Only redirect if they actually have a local key set up
+        const hasLocalKey = !!localStorage.getItem(`nova_private_key_${user.uid}`);
+        if (hasLocalKey) {
+          router.push("/dashboard");
+        } else {
+          // If already logged in but local key wiped, run the check flow automatically
+          processAuthFlow(user);
+        }
+      }
     });
     return () => unsubscribe();
   }, [router]);
 
-  const handleLogin = async () => {
+  const processAuthFlow = async (user: any) => {
     setLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
       const token = await user.getIdToken();
       setPendingUser(user);
       setPendingToken(token);
@@ -86,6 +92,18 @@ export default function LoginPage() {
       localStorage.setItem(`nova_private_key_${user.uid}`, exported.privateKey);
       setStep("setup_vault");
       setLoading(false);
+    } catch (err: any) {
+      toast.error("Auth flow failed: " + err.message);
+      setLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      await processAuthFlow(result.user);
     } catch (err: any) {
       toast.error("Login failed: " + err.message);
       setLoading(false);
