@@ -131,7 +131,17 @@ const EncryptedMedia = ({ msg, sharedKey, onOpenLightbox }: { msg: any, sharedKe
 function LightboxViewer({ media, onClose }: { media: {url: string, fileName: string}, onClose: () => void }) {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{startX: number, startY: number, originX: number, originY: number} | null>(null);
+  const dragRef = useRef<{
+    startX: number, startY: number, 
+    originX: number, originY: number, 
+    initialDistance: number, 
+    initialScale: number
+  } | null>(null);
+  const pointersRef = useRef<Map<number, {x: number, y: number}>>(new Map());
+
+  const getDistance = (p1: {x:number, y:number}, p2: {x:number, y:number}) => {
+    return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+  };
 
   return (
     <div
@@ -165,25 +175,80 @@ function LightboxViewer({ media, onClose }: { media: {url: string, fileName: str
       </div>
 
       <div
-        className="flex-1 w-full flex items-center justify-center overflow-hidden"
+        className="flex-1 w-full flex items-center justify-center overflow-hidden touch-none"
         style={{ cursor: scale > 1 ? 'grab' : 'default', touchAction: 'none' }}
         onPointerDown={(e) => {
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          dragRef.current = {
-            startX: e.clientX, startY: e.clientY,
-            originX: position.x, originY: position.y
-          };
+          pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          
+          const pts = Array.from(pointersRef.current.values());
+          if (pts.length === 1) {
+            dragRef.current = {
+              startX: pts[0].x, startY: pts[0].y,
+              originX: position.x, originY: position.y,
+              initialDistance: 0,
+              initialScale: scale
+            };
+          } else if (pts.length === 2) {
+            dragRef.current = {
+              startX: (pts[0].x + pts[1].x) / 2, 
+              startY: (pts[0].y + pts[1].y) / 2,
+              originX: position.x, originY: position.y,
+              initialDistance: getDistance(pts[0], pts[1]),
+              initialScale: scale
+            };
+          }
         }}
         onPointerMove={(e) => {
-          if (!dragRef.current || scale <= 1) return;
-          const dx = e.clientX - dragRef.current.startX;
-          const dy = e.clientY - dragRef.current.startY;
-          setPosition({
-            x: dragRef.current.originX + dx,
-            y: dragRef.current.originY + dy
-          });
+          if (!pointersRef.current.has(e.pointerId)) return;
+          pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          
+          if (!dragRef.current) return;
+          const pts = Array.from(pointersRef.current.values());
+
+          if (pts.length === 1 && scale > 1) {
+            const dx = pts[0].x - dragRef.current.startX;
+            const dy = pts[0].y - dragRef.current.startY;
+            setPosition({
+              x: dragRef.current.originX + dx,
+              y: dragRef.current.originY + dy
+            });
+          } else if (pts.length === 2) {
+            const dist = getDistance(pts[0], pts[1]);
+            const cx = (pts[0].x + pts[1].x) / 2;
+            const cy = (pts[0].y + pts[1].y) / 2;
+            
+            const newScale = Math.max(0.5, Math.min(5, dragRef.current.initialScale * (dist / dragRef.current.initialDistance)));
+            setScale(newScale);
+            
+            if (newScale > 1) {
+                const dx = cx - dragRef.current.startX;
+                const dy = cy - dragRef.current.startY;
+                setPosition({
+                   x: dragRef.current.originX + dx,
+                   y: dragRef.current.originY + dy
+                });
+            } else {
+                setPosition({ x: 0, y: 0 });
+            }
+          }
         }}
-        onPointerUp={() => {
+        onPointerUp={(e) => {
+          pointersRef.current.delete(e.pointerId);
+          const pts = Array.from(pointersRef.current.values());
+          if (pts.length === 1 && dragRef.current) {
+             dragRef.current = {
+               startX: pts[0].x, startY: pts[0].y,
+               originX: position.x, originY: position.y,
+               initialDistance: 0,
+               initialScale: scale
+             };
+          } else if (pts.length === 0) {
+             dragRef.current = null;
+          }
+        }}
+        onPointerCancel={(e) => {
+          pointersRef.current.delete(e.pointerId);
           dragRef.current = null;
         }}
         onDoubleClick={() => {
@@ -199,7 +264,7 @@ function LightboxViewer({ media, onClose }: { media: {url: string, fileName: str
           src={media.url}
           alt="Expanded media"
           draggable={false}
-          className="max-h-[90vh] max-w-[90vw] object-contain shadow-2xl rounded-lg select-none"
+          className="max-h-[90vh] max-w-[90vw] object-contain shadow-2xl rounded-lg select-none pointer-events-none"
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
             willChange: 'transform',
