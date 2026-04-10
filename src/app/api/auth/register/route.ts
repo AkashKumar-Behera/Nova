@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
       await userRef.update(updates);
     }
 
-    return NextResponse.json({ success: true, user: decodedToken });
+    const updatedDoc = await userRef.get();
+    return NextResponse.json({ success: true, user: updatedDoc.data() });
   } catch (error: any) {
     console.error("Registration Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

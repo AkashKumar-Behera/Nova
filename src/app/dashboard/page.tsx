@@ -131,7 +131,8 @@ export default function DashboardPage() {
   const [uploading, setUploading] = useState(false);
   
   // Interactive UI State
-  const [lightboxMedia, setLightboxMedia] = useState<{url: string, fileName: string, scale: number} | null>(null);
+  const [lightboxMedia, setLightboxMedia] = useState<{url: string, fileName: string, scale: number, x: number, y: number} | null>(null);
+  const lightboxDragRef = useRef<{startX: number, startY: number, originX: number, originY: number} | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [friendPresence, setFriendPresence] = useState<{state: string, last_changed: number} | null>(null);
@@ -905,7 +906,7 @@ export default function DashboardPage() {
                           {msg.parsedContent?.type === 'text' ? (
                             <p className="leading-relaxed">{msg.parsedContent.text}</p>
                           ) : (
-                            sharedKey && <EncryptedMedia msg={msg} sharedKey={sharedKey} onOpenLightbox={(url, name) => setLightboxMedia({ url, fileName: name, scale: 1 })} />
+                            sharedKey && <EncryptedMedia msg={msg} sharedKey={sharedKey} onOpenLightbox={(url, name) => setLightboxMedia({ url, fileName: name, scale: 1, x: 0, y: 0 })} />
                           )}
                           <div className={cn(
                             "flex items-center gap-1 mt-1 font-medium", 
@@ -1042,41 +1043,76 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* Lightbox Overlay */}
+      {/* Lightbox Overlay - WhatsApp Style with Pan & Zoom */}
       {lightboxMedia && (
-        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center animate-in fade-in duration-200">
-          {/* Top Actions */}
+        <div
+          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex flex-col animate-in fade-in duration-200"
+          onClick={(e) => { if (e.target === e.currentTarget) setLightboxMedia(null); }}
+        >
+          {/* Top Bar */}
           <div className="absolute top-0 w-full p-4 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10">
             <span className="text-sm font-medium text-slate-300 truncate max-w-[200px] md:max-w-md">
               {lightboxMedia.fileName}
             </span>
-            <div className="flex gap-2">
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10" onClick={() => setLightboxMedia(prev => prev ? {...prev, scale: prev.scale + 0.25} : null)}>
-                <ZoomIn className="w-5 h-5" />
+            <div className="flex gap-1 items-center">
+              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8"
+                onClick={() => setLightboxMedia(prev => prev ? {...prev, scale: Math.min(5, prev.scale + 0.5), x: 0, y: 0} : null)}>
+                <ZoomIn className="w-4 h-4" />
               </Button>
-              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10" onClick={() => setLightboxMedia(prev => prev ? {...prev, scale: Math.max(0.5, prev.scale - 0.25)} : null)}>
-                <ZoomOut className="w-5 h-5" />
+              <span className="text-xs text-slate-400 w-10 text-center">{Math.round(lightboxMedia.scale * 100)}%</span>
+              <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8"
+                onClick={() => setLightboxMedia(prev => prev ? {...prev, scale: Math.max(0.5, prev.scale - 0.5), x: 0, y: 0} : null)}>
+                <ZoomOut className="w-4 h-4" />
               </Button>
               <a href={lightboxMedia.url} download={lightboxMedia.fileName}>
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
-                  <Download className="w-5 h-5" />
+                <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8">
+                  <Download className="w-4 h-4" />
                 </Button>
               </a>
-              <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-300 hover:bg-red-400/10 ml-4" onClick={() => setLightboxMedia(null)}>
-                <X className="w-6 h-6" />
+              <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-300 hover:bg-red-400/10 h-8 w-8 ml-2"
+                onClick={() => setLightboxMedia(null)}>
+                <X className="w-5 h-5" />
               </Button>
             </div>
           </div>
-          
-          {/* Main Image */}
-          <div className="flex-1 w-full flex items-center justify-center overflow-auto p-4 custom-scrollbar">
-            <img 
-              src={lightboxMedia.url} 
-              alt="Expanded media" 
-              className="max-w-none transition-transform duration-200 ease-out shadow-2xl" 
-              style={{ transform: `scale(${lightboxMedia.scale})` }}
-              onDoubleClick={() => setLightboxMedia(prev => prev ? {...prev, scale: prev.scale === 1 ? 2 : 1} : null)}
+
+          {/* Image container - draggable */}
+          <div
+            className="flex-1 w-full flex items-center justify-center overflow-hidden"
+            style={{ cursor: lightboxMedia.scale > 1 ? 'grab' : 'default', touchAction: 'none' }}
+            onPointerDown={(e) => {
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              lightboxDragRef.current = {
+                startX: e.clientX, startY: e.clientY,
+                originX: lightboxMedia.x, originY: lightboxMedia.y
+              };
+            }}
+            onPointerMove={(e) => {
+              if (!lightboxDragRef.current || lightboxMedia.scale <= 1) return;
+              const dx = e.clientX - lightboxDragRef.current.startX;
+              const dy = e.clientY - lightboxDragRef.current.startY;
+              setLightboxMedia(prev => prev ? {...prev, x: lightboxDragRef.current!.originX + dx, y: lightboxDragRef.current!.originY + dy} : null);
+            }}
+            onPointerUp={() => { lightboxDragRef.current = null; }}
+            onDoubleClick={() => setLightboxMedia(prev => prev
+              ? prev.scale !== 1 ? {...prev, scale: 1, x: 0, y: 0} : {...prev, scale: 2, x: 0, y: 0}
+              : null)}
+          >
+            <img
+              src={lightboxMedia.url}
+              alt="Expanded media"
+              draggable={false}
+              className="max-h-[90vh] max-w-[90vw] object-contain shadow-2xl rounded-lg select-none"
+              style={{
+                transform: `translate(${lightboxMedia.x}px, ${lightboxMedia.y}px) scale(${lightboxMedia.scale})`,
+                transition: lightboxDragRef.current ? 'none' : 'transform 0.2s ease',
+                willChange: 'transform',
+              }}
             />
+          </div>
+
+          <div className="absolute bottom-4 w-full text-center text-[10px] text-slate-600">
+            Double-tap to reset · Drag to pan · Pinch/scroll to zoom
           </div>
         </div>
       )}
