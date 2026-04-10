@@ -249,6 +249,13 @@ export default function DashboardPage() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       if (u) {
+        // Enforce E2EE key existence before allowing dashboard access
+        const hasLocalKey = !!localStorage.getItem(`nova_private_key_${u.uid}`);
+        if (!hasLocalKey) {
+          console.warn("User authenticated but missing local E2EE keys. Redirecting to login/setup flow.");
+          router.push("/login");
+          return;
+        }
         setUser(u);
         loadSocialData(u);
       } else {
