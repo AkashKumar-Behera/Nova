@@ -388,7 +388,7 @@ export default function DashboardPage() {
           activeChatUpdatedId = cid;
           uiUpdatedPreviews = true;
         } catch (err: any) {
-          console.error("BG Decrypt Failed", err);
+          // console.error("BG Decrypt Failed", err);
           mBase.parsedContent = { type: 'text', text: `[Decryption Error] ${err.message || err.toString()}` };
           await LocalDB.saveMessage(cid, mBase);
           activeChatUpdatedId = cid;
