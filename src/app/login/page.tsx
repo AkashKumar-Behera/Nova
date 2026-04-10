@@ -104,9 +104,13 @@ export default function LoginPage() {
 
   const finishAuth = async (user: any, token: string) => {
     // E2EE Key Management
+    // Remove legacy un-scoped keys to avoid confusion
+    localStorage.removeItem("nova_public_key");
+    localStorage.removeItem("nova_private_key");
+
     let publicKeyBase64 = localStorage.getItem(`nova_public_key_${user.uid}`);
     if (!publicKeyBase64) {
-      console.log("Generating new E2EE keys...");
+      console.log("Generating fresh E2EE keys for ", user.uid);
       const keys = await CryptoUtils.generateKeyPair();
       const exported = await CryptoUtils.exportKeyPair(keys);
       localStorage.setItem(`nova_public_key_${user.uid}`, exported.publicKey);
