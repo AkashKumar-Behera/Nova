@@ -500,23 +500,19 @@ function DashboardContent() {
         setUser(u);
         loadSocialData(u);
 
-        // FCM Registration Logic
+        // FCM Registration Logic (Available in PWA and Modern Browsers)
         if ('serviceWorker' in navigator) {
-          const isStandalone = window.matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && (navigator as any).standalone === true);
-          
-          if (isStandalone) {
-            navigator.serviceWorker.register('/firebase-messaging-sw.js').then(async (registration) => {
-              console.log('Messaging SW registered:', registration.scope);
-              setSwRegistration(registration);
-              
-              // Only auto-init if already granted, otherwise show banner for user gesture
-              if (Notification.permission === 'granted') {
-                await MessagingUtils.initMessaging(u.uid, registration);
-              } else {
-                setShowNotificationBanner(true);
-              }
-            }).catch(err => console.error('SW Registration failed:', err));
-          }
+          navigator.serviceWorker.register('/firebase-messaging-sw.js').then(async (registration) => {
+            console.log('Messaging SW registered:', registration.scope);
+            setSwRegistration(registration);
+            
+            // Only auto-init if already granted, otherwise show banner for user gesture
+            if (Notification.permission === 'granted') {
+              await MessagingUtils.initMessaging(u.uid, registration);
+            } else {
+              setShowNotificationBanner(true);
+            }
+          }).catch(err => console.error('SW Registration failed:', err));
         }
       } else {
         router.push("/login");
