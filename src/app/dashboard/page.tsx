@@ -335,6 +335,7 @@ function DashboardContent() {
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const prevChatIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -539,11 +540,12 @@ function DashboardContent() {
   useEffect(() => {
     if (!chatId) return;
     let isMounted = true;
+    const isNewChat = prevChatIdRef.current !== chatId;
+    prevChatIdRef.current = chatId;
     
     const fetchChat = async () => {
       const chats = await LocalDB.getChat(chatId);
       if (isMounted) {
-         // Identify if the last message is ours or if we're already at the bottom
          const atBottom = chatContainerRef.current ? (chatContainerRef.current.scrollHeight - chatContainerRef.current.scrollTop - chatContainerRef.current.clientHeight < 150) : true;
          const lastMsgMine = chats.length > 0 && chats[chats.length - 1].from === user?.uid;
          
@@ -551,11 +553,12 @@ function DashboardContent() {
 
          setTimeout(() => {
              if (!chatContainerRef.current) return;
-             // If we just opened the chat, or we're at bottom, or we sent a message: scroll to bottom
-             if (chats.length !== messages.length && (atBottom || lastMsgMine)) {
-                 chatContainerRef.current.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
-             } else if (messages.length === 0) { // first load
+             // Always scroll to bottom when switching to a new chat (no animation)
+             if (isNewChat) {
                  chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+             } else if (atBottom || lastMsgMine) {
+                 // Smooth scroll for new messages in the current chat
+                 chatContainerRef.current.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
              }
          }, 50);
       }
@@ -1133,7 +1136,7 @@ function DashboardContent() {
   if (!user) return null;
 
   return (
-    <div className="flex h-screen bg-[#0a0a0c] text-slate-200 overflow-hidden font-sans relative w-full">
+    <div className="flex h-dvh bg-[#0a0a0c] text-slate-200 overflow-hidden font-sans relative w-full">
       {/* Mobile Sidebar Overlay Removed for Swipe/Native Navigation feel */}
 
       {/* Sidebar - Responsive */}
@@ -1289,11 +1292,11 @@ function DashboardContent() {
 
       {/* Main Chat Area */}
       <main className={cn(
-        "flex-1 flex flex-col bg-[#050507] relative transition-all duration-500 ease-in-out",
+        "flex-1 flex flex-col bg-[#050507] relative transition-all duration-500 ease-in-out min-h-0",
         !sidebarOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"
       )}>
         {selectedFriend ? (
-          <>
+          <div className="flex flex-col flex-1 min-h-0">
             {/* Chat Header */}
             <header className="h-16 border-b border-slate-800/50 bg-[#0f0f12]/80 backdrop-blur-xl flex items-center justify-between px-4 md:px-6 z-10">
               <div className="flex items-center gap-2 md:gap-4">
@@ -1338,7 +1341,7 @@ function DashboardContent() {
                  const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 150;
                  setShowScrollDown(!isAtBottom);
               }}
-              className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] select-text"
+              className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] select-text"
             >
               <div className="flex flex-col items-center justify-center py-8">
                 <div className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[10px] text-indigo-400 font-medium">
@@ -1519,7 +1522,7 @@ function DashboardContent() {
                  </Button>
                </div>
             </div>
-          </>
+          </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-6">
             <Button variant="outline" className="md:hidden absolute top-4 left-4 border-slate-800 text-slate-400" onClick={() => setSidebarOpen(true)}>
