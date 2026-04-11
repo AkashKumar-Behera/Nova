@@ -300,6 +300,8 @@ function DashboardContent() {
   const [friendIsTyping, setFriendIsTyping] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
+  const [showNotificationBanner, setShowNotificationBanner] = useState(false);
   
   // Interactive UI State
   const [lightboxMedia, setLightboxMedia] = useState<{url: string, fileName: string} | null>(null);
@@ -505,13 +507,13 @@ function DashboardContent() {
           if (isStandalone) {
             navigator.serviceWorker.register('/firebase-messaging-sw.js').then(async (registration) => {
               console.log('Messaging SW registered:', registration.scope);
+              setSwRegistration(registration);
               
-              // Wait for service worker to be ready
-              await navigator.serviceWorker.ready;
-              
-              const success = await MessagingUtils.initMessaging(u.uid, registration);
-              if (success) {
-                toast.success("Notifications enabled!", { description: "You will now receive message alerts in background." });
+              // Only auto-init if already granted, otherwise show banner for user gesture
+              if (Notification.permission === 'granted') {
+                await MessagingUtils.initMessaging(u.uid, registration);
+              } else {
+                setShowNotificationBanner(true);
               }
             }).catch(err => console.error('SW Registration failed:', err));
           }
@@ -1136,7 +1138,7 @@ function DashboardContent() {
   if (!user) return null;
 
   return (
-    <div className="flex h-dvh bg-[#0a0a0c] text-slate-200 overflow-hidden font-sans relative w-full">
+    <div className="flex h-[100dvh] bg-[#0a0a0c] text-slate-200 overflow-hidden font-sans relative w-full">
       {/* Mobile Sidebar Overlay Removed for Swipe/Native Navigation feel */}
 
       {/* Sidebar - Responsive */}
@@ -1157,6 +1159,34 @@ function DashboardContent() {
             </Button>
           </div>
         </div>
+        
+        {/* Notification Activation Banner */}
+        {showNotificationBanner && swRegistration && (
+          <div className="mx-4 mt-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex flex-col gap-3 animate-in slide-in-from-top-4 duration-500">
+             <div className="flex items-center gap-3">
+               <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center">
+                 <ShieldCheck className="w-4 h-4 text-white" />
+               </div>
+               <div className="flex flex-col">
+                 <span className="text-[11px] font-bold text-slate-200">Enable Notifications</span>
+                 <span className="text-[10px] text-slate-400">Receive alerts in background</span>
+               </div>
+             </div>
+             <Button 
+               size="sm" 
+               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white h-8 text-[11px] font-bold rounded-xl shadow-lg shadow-indigo-500/20"
+               onClick={async () => {
+                 const success = await MessagingUtils.initMessaging(user!.uid, swRegistration);
+                 if (success) {
+                   setShowNotificationBanner(false);
+                   toast.success("Notifications enabled!", { description: "Background alerts are now active." });
+                 }
+               }}
+             >
+                Activate Now
+             </Button>
+          </div>
+        )}
 
         <div className="p-4 space-y-4 flex-1 overflow-y-auto custom-scrollbar">
           {/* Notifications / Requests */}
