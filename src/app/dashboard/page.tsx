@@ -500,7 +500,7 @@ function DashboardContent() {
         setUser(u);
         loadSocialData(u);
 
-        // FCM Registration Logic (Available in PWA and Modern Browsers)
+        // FCM Registration Logic
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.register('/firebase-messaging-sw.js').then(async (registration) => {
             console.log('Messaging SW registered:', registration.scope);
